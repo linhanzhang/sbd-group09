@@ -1,78 +1,106 @@
 # Lab 2 Report
 
-> This repository is left empty on purpose. You can copy your solution from
-> Lab 1 into this repository, and continue to work from there.
-> Do not copy over the README.md, as the report for Lab 2 will have a different
-> template from Lab 1.
-
-> This is the template for your lab 2 report. Some guidelines and rules apply.
-
-> You can only change the *contents* of the sections, but not the section 
-> headers above the second level of hierarchy! This means you can only add
-> headers starting with `###`. 
- 
-> You must remove the text fields prefixed with `>`, such as this one, resulting
-> in a README.md without this template text in between.
-
-> Any report violating these rules will be immediately rejected for corrections 
-> (i.e. as if there is no report). 
-
 ## Usage
 
-> Describe how to use your program. You can assume the TAs who will be grading
-> this know how to do everything that is in the lab manual. You do not have to
-> repeat how to use e.g. Docker etc.
+The application is executed via `Planet.jar` , a fat JAR file packaged by the [sbt-assembly](https://github.com/sbt/sbt-assembly) plugin. After downloading the `Planet.jar` file, log in to your AWS account. 
 
-> Please do explain how to provide the correct inputs to your program.
+Then you will come to the AWS management console, from which you can get access to a variety of services that AWS provides. The one we use to run our Spark application is Elastic MapReduce(EMR). Type `EMR` in the search bar and click the link to the first result. Here, we can run our application in Spark cluster mode. 
+
+<p align="center">
+<img width="700" src="lab2_images/EMRclusters.png" alt="EMRclusters" title="EMRclusters" >
+</p> 
+<h6 align="center">EMR clusters interface</h6>
+
+
+To create a cluster, the hardware configuration we suggest using to run our application on the Planet data set is `master-node-type` for the master node, `core-node-type` for core nodes. 
+
+<p align="center">
+<img width="700" src="lab2_images/hardware_conf.png" alt="Hardware configuration" title="Hardware configuration" >
+</p> 
+<h6 align="center">Hardware configuration </h6>
+
+
+The final step is to add a step to the cluster. Choose Spark application as "Step type". Copy and paste the following configures into the "Spark-submit options" part. Select "Application location" from the S3 bucket and add an integer in "Arguments" to represent the rising sea level. Click "Add" and it is all set! 
+
+```
+--conf "spark.sql.autoBroadcastJoinThreshold=-1"  
+--conf "spark.sql.broadcastTimeout=36000" 
+--conf "spark.yarn.am.waitTime=36000"
+--conf "spark.yarn.maxAppAttempts=1" 
+```
+<p align="center">
+<img width="700" src="lab2_images/add_step.png" alt="Add a step to cluster" title="Add a step to cluster" >
+</p> 
+<h6 align="center"> Add a step to cluster </h6>
+
+
+
 
 ## Approach
 
 > Describe significant iterations (see Rubric) of your implementation.
 >
 > Note down relevant metrics such as: which dataset did you run on what system,
-> how much memory did this use, what was the run-time, cost, throughput, etc..
+> how much memory did this use, what was the run-time, cost, throughput, etc
 > or whatever is applicable in your story towards your final implementation.
 >
-> You can show both application-level improvements and cluster-level 
-> improvements here.
+> You can show both application-level improvements and cluster-level improvements here.
 
-> Example:
-> ### Iteration 0: Baseline
-> After achieving robustness level 3, we ultimately performed the following
-> experiment on the baseline implementation
->
-> | | |
-> |---|---|
-> | System                  | Laptop X |
-> | Workers                 | 4 | 
-> | Dataset                 | Netherlands | 
-> | Run time <br>(hh:mm:ss) | 00:15:04 | 
-> | (more relevant metrics) | (more relevant values) |
->  
-> ### Iteration 1: Improving X
-> By inspecting the application profile of the previous iteration, we discovered
-> that (some clearly referenced step in the code named X) caused a bottleneck,
-> taking up 90% of the total run time.
-> 
-> We came up with three alternatives:
-> * Alternative A: to replace the step with (explanation of some approach)
-> * Alternative B: to replace the step with (explanation of another approach)
-> 
-> We have ultimately chosen alternative B, because (discussion of weighing the
-> alternatives and reasoning leading to choice of alternative B).
-> 
-> After implementing this alternative, we re-ran the experiment, resulting in:
->  
-> | | |
-> |---|---|
-> | System                  | Laptop X |
-> | Workers                 | 4 | 
-> | Dataset                 | Netherlands | 
-> | Run time <br>(hh:mm:ss) | 00:10:04 | 
-> | (more relevant metrics) | (more relevant values) |
-> 
-> ### Iteration 2: Improving Y
-> Since the previous iteration didn't bring us to the target run-time of ...
+### Iteration 0: Baseline
+The metrics of Lab 1 are listed as follows:
+|Metrics| Value |
+|---|---|
+| System                  | Laptop  |
+| Workers                 | 1 | 
+| Dataset                 | Netherlands | 
+| Run time  | 20-22 minutes | 
+| (more relevant metrics) | (more relevant values) |
+  
+### Iteration 1: Improving performance on reading data
+By inspecting the spark history server, we found that the performance of our application is not optimal due to several reasons:
+1. The process of reading data takes a very long period of time
+2. Duplicated process of reading data
+3. Lack of proper configuration setting
+<p align="center">
+<img width="700" src="lab2_images/spark_stages.png" alt="Stages in Spark history server" title="Stages in Spark history server" >
+</p> 
+<h6 align="center"> Stage 1, 2 , 5 took up 99% of time consumption </h6>
+
+
+
+Accordingly, we implemented the following optimization:
+1. Filter out the unnecessary data immediately after reading the data. 
+    <p align="center">
+    <img width="500" src="lab2_images/wayrelation.png" alt="extra data" title="extra data" >
+    </p> 
+    <h6 align="center">   The type "relation" and "way" are useless! </h6>
+2. Cache intermediate data into memory
+3. Add some configures through a trial-and-error process and others' experience. For example, set the partition number to 5 instead of the default 200.
+ ```
+val spark = SparkSession
+      .builder()
+      .appName("Lab 2")
+      .config("spark.master", "local[*]")
+      .config("spark.sql.broadcastTimeout", "600") // avoid time-out error
+      .config("spark.io.compression.lz4.blockSize", "512kb")
+      .config("spark.shuffle.unsafe.file.output.buffer", "1mb")
+      .config("spark.shuffle.file.buffer", "1mb")
+      .config("spark.executor.memory", "2g")
+      .config("spark.sql.shuffle.partitions", 5)
+ ```
+ <h6 align="center">  Configures </h6>
+
+ After implementing this alternative, we re-ran the experiment, resulting in:
+|Metrics| Value |
+|---|---|
+| System                  | Laptop  |
+| Workers                 | 1 | 
+| Dataset                 | Netherlands | 
+| Run time  | 7-8 minutes | 
+| (more relevant metrics) | (more relevant values) |
+
+### Iteration 2: Improving Y
+Since the previous iteration didn't bring us to the target run-time of ...
 
 ## Summary of application-level improvements
 
@@ -87,3 +115,16 @@
 ## Conclusion
 
 > Briefly conclude what you have learned.
+<p align="center">
+<img width="700" src="lab2_images/cluster_overview.png" alt="Spark cluster mode" title="Spark cluster mode" >
+</p>
+
+Amazon EMR uses YARN as cluster manager to schedule the jobs for processing data and managing cluster resources. The program we developed with the `main` function is the driver program, it  
+
+
+
+ We came up with three alternatives:
+> * Alternative A: to replace the step with (explanation of some approach)
+> * Alternative B: to replace the step with (explanation of another approach)
+
+> 
