@@ -30,12 +30,6 @@ object Lab2 {
   def main(args: Array[String]) {
 
     // ******** Create a SparkSession  ***************
-    // val conf = new SparkConf()
-    //   .setAppName("Lab 2")
-    //   // .set("spark.kryo.registrationRequired", "true")
-    //   .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    // conf.registerKryoClasses(Array(classOf[Lab2], classOf[h3Helper]))
-    // val sparkContext = new SparkContext(conf)
 
     val spark = SparkSession
       .builder()
@@ -127,7 +121,7 @@ object Lab2 {
           "harbour"
         ) === "yes"
       )
-    //groupLessDF.show(50,false)
+
 
     //********** calculate the coarse/fine-grained H3 value ****************
     val h3mapdf = groupLessDF
@@ -140,9 +134,6 @@ object Lab2 {
       .withColumn("H3RoughArray", neighbourUDF(col("lat"), col("lon"), lit(0)))
       .select(col("H3").as("harbourH3"), col("H3RoughArray"))
 
-    //  println("harbourDF")
-    //  harbourDF.show(50, false)
-
     val placeDF = h3mapdf // harbour is filtered out
       .filter(col("harbour").isNull)
       .drop("harbour")
@@ -154,17 +145,8 @@ object Lab2 {
         col("place"),
         col("lat"),
         col("lon")
-        //  col("H3Rough")
       )
-    // placeDF
-    //   .orderBy(asc("H3"))
-    //   .write
-    //   .format("parquet")
-    //   .bucketBy(1188, "H3")
-    //   .mode(SaveMode.Overwrite)
-    //   .saveAsTable("placeTbl")
-    // val placeTblDF =
-    // spark.sql("CACHE TABLE placeTbl")
+
     println("******************************************************")
     
     //   println("placeDF")
@@ -180,43 +162,14 @@ object Lab2 {
       .builder()
       .getOrCreate()
     val elevationH3 = alosDF
-      //EU
-      // .filter(
-      //     col("lat") < 72 && col("lat") > 36 && col("lon") > -9 && col("lon") < 66
-      //   )
-      // NA
-      // .filter(
-      //   col("lat") < 81 && col("lat") > 18 && col("lon") > -167 && col("lon") < -20
-      // )
-
-      // france
-      // .filter(
-      //   col("lat") < 52 && col("lat") > 41 && col("lon") > 4 && col("lon") < 9
-      // )
       .withColumn("H3", geoUDF(col("lat"), col("lon"), lit(7)))
       .select(col("H3"), col("elevation"))
       
-    // val elevationSpecAgg = Window.partitionBy("H3")
-    // val elevationSpec = Window.partitionBy("H3").orderBy("H3")
     
     val elevationDF = elevationH3
-    // .withColumn("row",row_number.over(elevationSpec))
-    // .withColumn("min",min(col("H3")).over(elevationSpecAgg))
-    // .where(col("row")===1)
-    // .select("H3","elevation")
       .groupBy("H3")
       .min("elevation")
       .withColumnRenamed("min(elevation)", "elevation")
-
-    // elevationDF
-    //   .orderBy(asc("H3"))
-    //   .write
-    //   .format("parquet")
-    //   .bucketBy(1188, "H3")
-    //   .mode(SaveMode.Overwrite)
-    //   .saveAsTable("elevationTbl")
-    //val elevationTblDF =
-    // spark.sql("CACHE TABLE elevationTbl")
 
     println("******************************************************")
     println("**** Finished building up DAG for reading ALOSMap ****")
@@ -238,10 +191,6 @@ object Lab2 {
 
     /** ****** Combine osm and alos with h3 value *******
       */
-    // val placeBucketDF = spark.table("placeTblDF")
-    // val elevationBucketDF = spark.table("elevationTblDF")
-    //combinedDF - name,place,population,H3,H3Rough,min(elevation)
-    // val combinedDF_pre = placeDF
      val combinedDF = placeDF
        .join(elevationDF, Seq("H3"), "inner")
     // val combinedDF = placeBucketDF
@@ -250,18 +199,6 @@ object Lab2 {
         StorageLevels.MEMORY_AND_DISK
       ) // cached for the the next two operation
 
-    // val combineMinDF = combinedDF_pre
-    //   .groupBy("name")
-    //   .min("elevation")
-    //   .withColumnRenamed("min(elevation)", "elevation")
-
-    // val combinedDF =
-    //   combinedDF_pre // each place with its single elevation reference
-    //     .join(combineMinDF, Seq("name", "elevation"))
-    //     .dropDuplicates("name")
-    //     .cache()
-    // println("combinedDF")
-    // combinedDF.show(50,false)
 
     /** ********split into flood and safe df **********
       */
@@ -279,25 +216,20 @@ object Lab2 {
       .withColumnRenamed("name", "place")
       .withColumnRenamed("H3", "floodH3")
       .withColumn("num_evacuees", col("num_evacuees").cast("int"))
-    //.cache()
-    //  println("floodDF")
-    //  floodDF.show(50, false)
+
 
     val safeDF = combinedDF
       .filter(col("elevation") > riseMeter)
       .drop("elevation")
       .filter(col("place") === "city") //the destination must be a city
       .drop("place")
-      // .withColumn("H3Rough", geoUDF(col("lat"), col("lon"), lit(rough_res)))
+
       .withColumn("H3RoughArray", neighbourUDF(col("lat"), col("lon"), lit(0)))
       .drop("lat", "lon")
       .withColumnRenamed("population", "safe_population")
       .withColumnRenamed("name", "destination")
       .withColumnRenamed("H3", "safeH3")
-    //.select(col("destination"),col("safeH3"),col("safe_population"),col("H3Rough"),split(col("H3Rough"), " ").as("H3RoughArray"))
-    //.cache()
-    // println("safeDF")
-    // safeDF.show(50, false)
+ 
 
     return (floodDF, safeDF)
 
@@ -408,9 +340,7 @@ object Lab2 {
         "place",
         "harbour_distance"
       )
-    // println("closestHarbour")
-    // closestHarbour.show(50, false)
-    //closestHarbour.printSchema()
+
 
     val floodToCH = closestCity
       .join(closestHarbour, Seq("place"), "inner")
@@ -454,8 +384,6 @@ object Lab2 {
     ) // evacuees to the nearest city
     val near_harbour_new =
       rest_popu.union(change_popu)
-    // near_harbour_new.printSchema()
-    //.sort("place") // Combined DF
     println("******************************************************")
     println("************ evacuees to harbour and city ************")
 
@@ -533,9 +461,6 @@ object Lab2 {
     receive_output.write
       .mode("overwrite")
       .orc("s3://group-09/Output/data/receive_output") // Cloud output
-    // receive_output.write
-    //   .mode("overwrite")
-    //   .orc("output/data/receive_output.orc") //Local output
     println("****************** Finished save *********************")
 
   }
