@@ -109,15 +109,17 @@ Gained confidence from running our application locally, we decided to deploy it 
 
 By inspecting the Spark history server and Ganglia, we found that the lack of parallelism is the mean reason that slows down the process.
  <p align="center">
-    <img width="800" src="CPU_FRA.png" alt="CPU data on France" title="CPU data on France" >
+    <img width="700" src="lab2_images/CPU_FRA.png" alt="CPU data on France" title="CPU data on France" >
      </p>
+<h6 align="center"> Cluster CPU on Ganglia </h6>
     <p align="center">
-    <img width="800" src="Memory_FRA.png" alt="Memory data on France" title="Memory data on France" >
+    <img width="700" src="lab2_images/Memory_FRA.png" alt="Memory data on France" title="Memory data on France" >
     </p> 
+<h6 align="center"> Cluster memory on Ganglia </h6>
     <p align="center">
-     <img width="800"  src="load_FRA.png" alt="CPU load on France" title="CPU load on France" >
+     <img width="700"  src="lab2_images/load_FRA.png" alt="CPU load on France" title="CPU load on France" >
      </p>
-    <h6 align="center"> Cluster data on Ganglia </h6>
+    <h6 align="center"> Cluster aggregated load_one on Ganglia </h6>
 
 Since our program is developed in a scalable fashion, with more virtual CPU cores added to the cluster, the time consumption should scale down significantly. So we chose two ` m4.4xlarge ` as our core instance nodes, the result is just as we expected:
 
@@ -188,6 +190,7 @@ By observing the application DAG in spark-history server,
 <p align="center">
 <img width="800" src="DAG_before_reduce.png"  alt="DAG before reducing shuffle" title="Bottleneck in joining osm and alos" >
 </p>
+<h6 align="center"> DAG before reducing shuffle </h6>
 
 The critical bottleneck happens in one of the `SortMergeJoin` steps, of which the summing execution time is 265.09 h. This operation corresponds to the `join()` operation between two dataframes read from OpenStreetMap and ALOS (`placeDF` and `elevationDF`). A large amount of data shuffle caused a remarkable time consumption. 
 
@@ -200,7 +203,8 @@ With this change, the amount of records entering `SortMergeJoin` is reduced sign
 <p align="center">
 <img width=800" src="DAG_after_reduce.png"  alt="DAG before reducing shuffle" title="Bottleneck in joining osm and alos" >
 </p>
-
+<h6 align="center"> DAG after reducing shuffle </h6>
+                                                                                                                        
 Running time has dropped sharply under the same configuration.
 ```
 50min -> 15min
