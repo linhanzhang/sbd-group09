@@ -7,7 +7,7 @@ The application is executed via `Planet.jar` , a fat JAR file packaged by the [s
 Then it will come to the AWS management console, from which customers can get access to a variety of services that AWS provides. The one we use to run our Spark application is Elastic MapReduce(EMR). Type `EMR` in the search bar and click the link to the first result. Here, we can run our application in Spark cluster mode. 
 
 <p align="center">
-<img width="700" src="lab2_images/EMRclusters.png" alt="EMRclusters" title="EMRclusters" >
+<img width="700" src="EMRclusters.png" alt="EMRclusters" title="EMRclusters" >
 </p> 
 <h6 align="center">EMR clusters interface</h6>
 
@@ -27,7 +27,7 @@ The final step is to add a step to the cluster. Choose Spark application as "Ste
 --conf "spark.yarn.maxAppAttempts=1" 
 ```
 <p align="center">
-<img width="700" src="lab2_images/add_step.png" alt="Add a step to cluster" title="Add a step to cluster" >
+<img width="700" src="add_step.png" alt="Add a step to cluster" title="Add a step to cluster" >
 </p> 
 <h6 align="center"> Add a step to cluster </h6>
 
@@ -51,7 +51,7 @@ By inspecting the spark history server, we found that the performance of our app
 2. Duplicated process of reading data
 3. Lack of proper configuration setting
 <p align="center">
-<img width="700" src="lab2_images/spark_stages.png" alt="Stages in Spark history server" title="Stages in Spark history server" >
+<img width="700" src="spark_stages.png" alt="Stages in Spark history server" title="Stages in Spark history server" >
 </p> 
 <h6 align="center"> Stage 1, 2 , 5 took up 99% of time consumption </h6>
 
@@ -60,7 +60,7 @@ By inspecting the spark history server, we found that the performance of our app
 Accordingly, we implemented the following optimization:
 1. Filter out the unnecessary data immediately after reading the data. 
     <p align="center">
-    <img width="500" src="lab2_images/wayrelation.png" alt="extra data" title="extra data" >
+    <img width="500" src="wayrelation.png" alt="extra data" title="extra data" >
     </p> 
     <h6 align="center">   The type "relation" and "way" are useless! </h6>
 2. Cache intermediate data. The dataframes that are used multiple times can be stored in memory to make the access time much shorter.
@@ -109,13 +109,13 @@ Gained confidence from running our application locally, we decided to deploy it 
 
 By inspecting the Spark history server and Ganglia, we found that the lack of parallelism is the mean reason that slows down the process.
  <p align="center">
-    <img width="800" src="lab2_images/CPU_FRA.png" alt="CPU data on France" title="CPU data on France" >
+    <img width="800" src="CPU_FRA.png" alt="CPU data on France" title="CPU data on France" >
      </p>
     <p align="center">
-    <img width="800" src="lab2_images/Memory_FRA.png" alt="Memory data on France" title="Memory data on France" >
+    <img width="800" src="Memory_FRA.png" alt="Memory data on France" title="Memory data on France" >
     </p> 
     <p align="center">
-     <img width="800"  src="lab2_images/load_FRA.png" alt="CPU load on France" title="CPU load on France" >
+     <img width="800"  src="load_FRA.png" alt="CPU load on France" title="CPU load on France" >
      </p>
     <h6 align="center"> Cluster data on Ganglia </h6>
 
@@ -166,13 +166,13 @@ After handling the errors, a full application run can be completed on the cluste
 By observing the Ganglia diagram:
 
 <p float="left">
-<img width="400" src="lab2_images/ganglia_na_memo.png"  alt="Ganglia cluster memory diagram of NA" title="Ganglia cluster memory diagram of NA" >
-<img width="400" height="270" src="lab2_images/ganglia_na_cpu.png"  alt="Ganglia cluster CPU diagram of NA" title="Ganglia cluster CPU diagram of NA" >
+<img width="400" src="ganglia_na_memo.png"  alt="Ganglia cluster memory diagram of NA" title="Ganglia cluster memory diagram of NA" >
+<img width="400" height="270" src="ganglia_na_cpu.png"  alt="Ganglia cluster CPU diagram of NA" title="Ganglia cluster CPU diagram of NA" >
 </p>
 <h6 align="center"> Cluster data on Ganglia </h6>
 
 <p align="center">
-    <img width="500"  src="lab2_images/spill.png" alt="Memory spill in stage 3" title="Memory spill in stage 3" >
+    <img width="500"  src="spill.png" alt="Memory spill in stage 3" title="Memory spill in stage 3" >
     </p>
 <h6 align="center"> Memory spill in stage 3</h6>
 
@@ -186,7 +186,7 @@ Thus, the only way to make a breakthrough is on the application level.
 #### Reducing shuffle cost
 By observing the application DAG in spark-history server, 
 <p align="center">
-<img width="800" src="lab2_images/DAG_before_reduce.png"  alt="DAG before reducing shuffle" title="Bottleneck in joining osm and alos" >
+<img width="800" src="DAG_before_reduce.png"  alt="DAG before reducing shuffle" title="Bottleneck in joining osm and alos" >
 </p>
 
 The critical bottleneck happens in one of the `SortMergeJoin` steps, of which the summing execution time is 265.09 h. This operation corresponds to the `join()` operation between two dataframes read from OpenStreetMap and ALOS (`placeDF` and `elevationDF`). A large amount of data shuffle caused a remarkable time consumption. 
@@ -198,7 +198,7 @@ is kept. These can be altered by removing the data with the same "H3" in `elevat
 With this change, the amount of records entering `SortMergeJoin` is reduced significantly. 
 
 <p align="center">
-<img width=800" src="lab2_images/DAG_after_reduce.png"  alt="DAG before reducing shuffle" title="Bottleneck in joining osm and alos" >
+<img width=800" src="DAG_after_reduce.png"  alt="DAG before reducing shuffle" title="Bottleneck in joining osm and alos" >
 </p>
 
 Running time has dropped sharply under the same configuration.
@@ -274,7 +274,7 @@ To improve the performance, we implemented multiple methods from different aspec
 2. In the second most time-consuming stage, we deleted an unreasonable `persist` operation. It is unnecessary to store the data into memory here because the dataframe is not frequently used and is also too large to store in memory. Plus, it causes overhead during the serialization process.
 
 <p align="center">
-    <img width="700"  src="lab2_images/persist.png" alt="Memory spill in stage 3" title="Memory spill in stage 3" >
+    <img width="700"  src="persist.png" alt="Memory spill in stage 3" title="Memory spill in stage 3" >
     </p>
 <h6 align="center"> Unnecessary persist operation </h6>
 
