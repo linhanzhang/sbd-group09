@@ -109,17 +109,17 @@ Gained confidence from running our application locally, we decided to deploy it 
 
 By inspecting the Spark history server and Ganglia, we found that the lack of parallelism is the mean reason that slows down the process.
  <p align="center">
-    <img width="700" src="lab2_images/CPU_FRA.png" alt="CPU data on France" title="CPU data on France" >
+    <img width="700" src="CPU_FRA.png" alt="CPU data on France" title="CPU data on France" >
      </p>
 <h6 align="center"> Cluster CPU on Ganglia </h6>
     <p align="center">
-    <img width="700" src="lab2_images/Memory_FRA.png" alt="Memory data on France" title="Memory data on France" >
+    <img width="700" src="Memory_FRA.png" alt="Memory data on France" title="Memory data on France" >
     </p> 
 <h6 align="center"> Cluster memory on Ganglia </h6>
     <p align="center">
-     <img width="700"  src="lab2_images/load_FRA.png" alt="CPU load on France" title="CPU load on France" >
+     <img width="700"  src="load_FRA.png" alt="CPU load on France" title="CPU load on France" >
      </p>
-    <h6 align="center"> Cluster aggregated load_one on Ganglia </h6>
+<h6 align="center"> Cluster aggregated load_one on Ganglia </h6>
 
 Since our program is developed in a scalable fashion, with more virtual CPU cores added to the cluster, the time consumption should scale down significantly. So we chose two ` m4.4xlarge ` as our core instance nodes, the result is just as we expected:
 
