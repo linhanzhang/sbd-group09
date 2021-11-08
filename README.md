@@ -2,7 +2,7 @@
 
 ## Usage
 
-The application is executed via `Planet.jar` , a fat JAR file packaged by the [sbt-assembly](https://github.com/sbt/sbt-assembly) plugin. After downloading the `Planet.jar` file, log in to your AWS account. 
+The application is executed via `Planet.jar` , a fat JAR file packaged by the [sbt-assembly](https://github.com/sbt/sbt-assembly) plugin. First log in to your AWS account. 
 
 Then it will come to the AWS management console, from which customers can get access to a variety of services that AWS provides. The one we use to run our Spark application is Elastic MapReduce(EMR). Type `EMR` in the search bar and click the link to the first result. Here, we can run our application in Spark cluster mode. 
 
