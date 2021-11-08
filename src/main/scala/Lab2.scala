@@ -126,7 +126,6 @@ object Lab2 {
     //********** calculate the coarse/fine-grained H3 value ****************
     val h3mapdf = groupLessDF
       .withColumn("H3", geoUDF(col("lat"), col("lon"), lit(7)))
-    //h3mapdf.show(50,false)
 
     //***********separate the harbours and other places *******************
     val harbourDF = h3mapdf
@@ -137,7 +136,6 @@ object Lab2 {
     val placeDF = h3mapdf // harbour is filtered out
       .filter(col("harbour").isNull)
       .drop("harbour")
-      //.withColumn("H3Rough", geoUDF(col("lat"), col("lon"), lit(5)))
       .select(
         col("name"),
         col("population"),
@@ -148,9 +146,6 @@ object Lab2 {
       )
 
     println("******************************************************")
-    
-    //   println("placeDF")
-    //  placeDF.show(50,false)
     println("******************************************************")
     println("* Finished building up DAG for reading OpenStreetMap *")
 
@@ -193,8 +188,6 @@ object Lab2 {
       */
      val combinedDF = placeDF
        .join(elevationDF, Seq("H3"), "inner")
-    // val combinedDF = placeBucketDF
-    //   .join(elevationBucketDF, Seq("H3"), "inner")
       .persist(
         StorageLevels.MEMORY_AND_DISK
       ) // cached for the the next two operation
@@ -293,7 +286,6 @@ object Lab2 {
         "place",
         "city_distance"
       ) // avoid duplicate due to the same city_distance
-    // closestCity.show(50, false)
 
     /** ***** find the closest harbour ******
       */
@@ -364,7 +356,7 @@ object Lab2 {
     val near_city = floodToCH
       .filter(col("harbour_distance") > col("city_distance"))
       .drop("harbour_distance", "city_distance")
-    //  near_city.printSchema()
+
     // ********* operation on <near_harbour> DF **********
     val change_dest =
       near_harbour.withColumn(
@@ -392,12 +384,11 @@ object Lab2 {
         .union(near_city)
         .sort("place") // Combine <near_harbour_new> and <near_city>
 
-    //  relocate_output.printSchema()
 
     println("******************************************************")
     println("************* output => evacuees by place ************")
 
-    //relocate_output.show(50,false)
+
 
     println("******************************************************")
     println("******************* Saving data **********************")
@@ -407,16 +398,9 @@ object Lab2 {
       .mode("overwrite")
       .orc("s3://group-09/Output/data/relocate") // Cloud output
 
-    // relocate_output
-    //   .drop("safe_population")
-    //   .write
-    //   .mode("overwrite")
-    //   .orc("output/data/relocate.orc") // local output
+
     println("****************** Finished save *********************")
 
-    /*
-        val  = spark.read.format("orc").load("output_12.orc")
-     */
 
     // ********* calculate the total number of evacuees to each destination ********
     println("******************************************************")
@@ -453,9 +437,6 @@ object Lab2 {
 
     println("******************************************************")
     println("*** output => population change of the destination ***")
-
-    //receive_output.show(50,false)
-
     println("******************************************************")
     println("******************* Saving data **********************")
     receive_output.write
