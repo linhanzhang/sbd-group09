@@ -27,7 +27,7 @@ The final step is to add a step to the cluster. Choose Spark application as "Ste
 --conf "spark.yarn.maxAppAttempts=1" 
 ```
 <p align="center">
-<img width="700" src="add_step.png" alt="Add a step to cluster" title="Add a step to cluster" >
+<img width="700" src="Add_step.png" alt="Add a step to cluster" title="Add a step to cluster" >
 </p> 
 <h6 align="center"> Add a step to cluster </h6>
 
