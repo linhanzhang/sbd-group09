@@ -3,9 +3,16 @@ import com.uber.h3core.H3Core
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.DataFrame
+import com.uber.h3core.exceptions.DistanceUndefinedException
+import org.apache.spark.sql.SaveMode
 import scala.sys.process._
 import collection.JavaConverters._
 import org.apache.log4j.{Level, Logger}
+import org.apache.spark.api.java.StorageLevels
+import org.apache.spark.SparkConf
+import org.apache.spark.SparkContext
+import org.apache.spark.sql.expressions.Window
+
 
 object Lab2 {
 // converts latitude and longitude data into H3 index
@@ -23,23 +30,39 @@ object Lab2 {
   def main(args: Array[String]) {
 
     // ******** Create a SparkSession  ***************
+    // val conf = new SparkConf()
+    //   .setAppName("Lab 2")
+    //   // .set("spark.kryo.registrationRequired", "true")
+    //   .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    // conf.registerKryoClasses(Array(classOf[Lab2], classOf[h3Helper]))
+    // val sparkContext = new SparkContext(conf)
+
     val spark = SparkSession
       .builder()
       .appName("Lab 2")
-      .config("spark.master", "local")
-      .config("spark.sql.broadcastTimeout", "3600") // avoid time-out error
-      .config("spark.io.compression.lz4.blockSize", "512kb")
-      .config("spark.shuffle.unsafe.file.output.buffer", "1mb")
-      .config("spark.shuffle.file.buffer", "1mb")
-      .config("spark.executor.memory", "2g")
+      //.config(conf)
       .getOrCreate()
+    // .config("spark.master", "local[*]")
+    //.config("spark.sql.broadcastTimeout", "36000") // avoid time-out error
+    //.config("spark.io.compression.lz4.blockSize", "512kb")
+    //.config("spark.shuffle.unsafe.file.output.buffer", "1mb")
+    //.config("spark.shuffle.file.buffer", "1mb")
+    //.config("spark.executor.memory", "2g")
+    // Assigning executors with a large number of virtual cores leads to
+    // a low number of executors and reduced parallelism.
+    // Assigning a low number of virtual cores leads to
+    // a high number of executors,
+    // causing a larger amount of I/O operations.
+    //.config("spark.executor.cores", 5)
+
     spark.sparkContext.setLogLevel("ERROR") //stop DEBUG and INFO messages
-    spark.conf.set("spark.sql.shuffle.partitions", 5)
+    //spark.conf.set("spark.sql.shuffle.partitions", 5)
     //  change the log levels
     Logger.getLogger("org.apache.spark").setLevel(Level.WARN)
+    import spark.implicits._
 
     val height = typecheck.matchFunc(args(0))
-    if (height == 0 || height == -1) {
+    if (height == -1) {
       println("******************************************************")
       println("Invalid input, program terminated")
       spark.stop
@@ -47,9 +70,14 @@ object Lab2 {
       println("******************************************************")
       println("        The sea level rised " + height + " m          ")
       val (placeDF, harbourDF) = readOpenStreetMap(
-        spark.read.format("orc").load("netherlands-latest.osm.orc")
-      ); //complete osm dataset
-      val elevationDF = readALOS(spark.read.load("parquet/*")); //complete alos dataset
+        //spark.read.format("orc").load("s3://abs-tudelft-sbd-2021/france.orc")
+        //spark.read.format("orc").load("s3://abs-tudelft-sbd-2021/north-america.orc")
+        // spark.read.format("orc").load("s3://abs-tudelft-sbd-2021/europe.orc")
+        spark.read.format("orc").load("s3://osm-pds/planet/planet-latest.orc")
+      );
+      val elevationDF = readALOS(
+        spark.read.load("s3://abs-tudelft-sbd-2021/ALPSMLC30.parquet/")
+      ); //complete alos dataset
 
       // ************** combine two datasets with H3 ************************
       val (floodDF, safeDF) = combineDF(
@@ -57,15 +85,17 @@ object Lab2 {
         elevationDF.select(col("H3"), col("elevation")),
         height
       )
-      // *************** find the closest destination *************
+      // // *************** find the closest destination *************
       findClosestDest(floodDF, safeDF, harbourDF)
-      // Stop the underlying SparkContext0
+      // Stop the underlying SparkContext
       spark.stop
     }
   }
 
   def readOpenStreetMap(df: DataFrame): (DataFrame, DataFrame) = {
-
+    val spark = SparkSession
+      .builder()
+      .getOrCreate()
     // ********* explode and filter the useful tags ************
     val splitTagsDF = df
       .filter(col("type") === "node")
@@ -79,30 +109,13 @@ object Lab2 {
         col("key") === "name" || col("key") === "place" ||
           col("key") === "population" || col("key") === "harbour"
       )
+      //.persist(StorageLevels.MEMORY_AND_DISK)
 
     // ********** make the keys to be column names *************
     val groupdf = splitTagsDF
       .groupBy("id", "lat", "lon")
       .pivot("key", Seq("name", "place", "population", "harbour"))
       .agg(first("value"))
-
-    /*
-	  root
-	  |-- id: long (nullable = true)
-	  |-- type: string (nullable = true)
-	  |-- lat: decimal(9,7) (nullable = true)
-	  |-- lon: decimal(10,7) (nullable = true)
-	  |-- name: string (nullable = true)
-	  |-- place: string (nullable = true)
-	  |-- population: string (nullable = true)
-	  |-- harbour: string (nullable = true)
-+-------+--------+----+----+--------------+-----+----------+-------+
-|id     |type    |lat |lon |name          |place|population|harbour|
-+-------+--------+----+----+--------------+-----+----------+-------+
-|144640 |relation|null|null|Hooglanderveen|null |null      |null   |
-|333291 |relation|null|null|Bus 73: Maarss|null |null      |null   |
-|358048 |relation|null|null|Bus 102: Utrec|null |null      |null   |
-     */
 
     // ********** remove the rows with imcomplete information *******
     val groupLessDF = groupdf
@@ -119,7 +132,6 @@ object Lab2 {
     //********** calculate the coarse/fine-grained H3 value ****************
     val h3mapdf = groupLessDF
       .withColumn("H3", geoUDF(col("lat"), col("lon"), lit(7)))
-      .cache() // this is for dividing the places into groups, and the calculation of distances will be done within each groups
     //h3mapdf.show(50,false)
 
     //***********separate the harbours and other places *******************
@@ -127,7 +139,6 @@ object Lab2 {
       .filter(col("harbour") === "yes")
       .withColumn("H3RoughArray", neighbourUDF(col("lat"), col("lon"), lit(0)))
       .select(col("H3").as("harbourH3"), col("H3RoughArray"))
-    //.cache()
 
     //  println("harbourDF")
     //  harbourDF.show(50, false)
@@ -145,27 +156,68 @@ object Lab2 {
         col("lon")
         //  col("H3Rough")
       )
-    //.cache()
+    // placeDF
+    //   .orderBy(asc("H3"))
+    //   .write
+    //   .format("parquet")
+    //   .bucketBy(1188, "H3")
+    //   .mode(SaveMode.Overwrite)
+    //   .saveAsTable("placeTbl")
+    // val placeTblDF =
+    // spark.sql("CACHE TABLE placeTbl")
+    println("******************************************************")
+    
     //   println("placeDF")
     //  placeDF.show(50,false)
     println("******************************************************")
     println("* Finished building up DAG for reading OpenStreetMap *")
 
     return (placeDF, harbourDF)
-    /*
-+----------+----+----------+---------+--------+-------+-----+---------------+---------------+
-|id        |type|lat       |lon      |name    |place  |popu |H3             |H3Rough        |
-+----------+----+----------+---------+--------+-------+-----+---------------+---------------+
-|44843991  |node|52.0102642|5.4332757|Leersum |village|7511 |8a1969053247fff|85196907fffffff|
-|44710922  |node|51.9810496|5.1220284|Hageste |village|1455 |8a196972e56ffff|85196973fffffff|
-|45568761  |node|52.1746100|5.2909500|Soest   |town   |39395|8a19691890a7fff|8519691bfffffff|
-     */
+
   }
   def readALOS(alosDF: DataFrame): DataFrame = {
+    val spark = SparkSession
+      .builder()
+      .getOrCreate()
+    val elevationH3 = alosDF
+      //EU
+      // .filter(
+      //     col("lat") < 72 && col("lat") > 36 && col("lon") > -9 && col("lon") < 66
+      //   )
+      // NA
+      // .filter(
+      //   col("lat") < 81 && col("lat") > 18 && col("lon") > -167 && col("lon") < -20
+      // )
 
-    val elevationDF = alosDF
+      // france
+      // .filter(
+      //   col("lat") < 52 && col("lat") > 41 && col("lon") > 4 && col("lon") < 9
+      // )
       .withColumn("H3", geoUDF(col("lat"), col("lon"), lit(7)))
       .select(col("H3"), col("elevation"))
+      
+    // val elevationSpecAgg = Window.partitionBy("H3")
+    // val elevationSpec = Window.partitionBy("H3").orderBy("H3")
+    
+    val elevationDF = elevationH3
+    // .withColumn("row",row_number.over(elevationSpec))
+    // .withColumn("min",min(col("H3")).over(elevationSpecAgg))
+    // .where(col("row")===1)
+    // .select("H3","elevation")
+      .groupBy("H3")
+      .min("elevation")
+      .withColumnRenamed("min(elevation)", "elevation")
+
+    // elevationDF
+    //   .orderBy(asc("H3"))
+    //   .write
+    //   .format("parquet")
+    //   .bucketBy(1188, "H3")
+    //   .mode(SaveMode.Overwrite)
+    //   .saveAsTable("elevationTbl")
+    //val elevationTblDF =
+    // spark.sql("CACHE TABLE elevationTbl")
+
     println("******************************************************")
     println("**** Finished building up DAG for reading ALOSMap ****")
     return elevationDF
@@ -180,24 +232,34 @@ object Lab2 {
       elevationDF: DataFrame,
       riseMeter: Int
   ): (DataFrame, DataFrame) = {
+    val spark = SparkSession
+      .builder()
+      .getOrCreate()
 
     /** ****** Combine osm and alos with h3 value *******
       */
+    // val placeBucketDF = spark.table("placeTblDF")
+    // val elevationBucketDF = spark.table("elevationTblDF")
     //combinedDF - name,place,population,H3,H3Rough,min(elevation)
-    val combinedDF_pre = placeDF
-      .join(elevationDF, Seq("H3"), "inner")
-      .cache() // cached for the self-join operation
+    // val combinedDF_pre = placeDF
+     val combinedDF = placeDF
+       .join(elevationDF, Seq("H3"), "inner")
+    // val combinedDF = placeBucketDF
+    //   .join(elevationBucketDF, Seq("H3"), "inner")
+      .persist(
+        StorageLevels.MEMORY_AND_DISK
+      ) // cached for the the next two operation
 
-    val combineMinDF = combinedDF_pre
-      .groupBy("name")
-      .min("elevation")
-      .withColumnRenamed("min(elevation)", "elevation")
+    // val combineMinDF = combinedDF_pre
+    //   .groupBy("name")
+    //   .min("elevation")
+    //   .withColumnRenamed("min(elevation)", "elevation")
 
-    val combinedDF =
-      combinedDF_pre // each place with its single elevation reference
-        .join(combineMinDF, Seq("name", "elevation"))
-        .dropDuplicates("name")
-        .cache()
+    // val combinedDF =
+    //   combinedDF_pre // each place with its single elevation reference
+    //     .join(combineMinDF, Seq("name", "elevation"))
+    //     .dropDuplicates("name")
+    //     .cache()
     // println("combinedDF")
     // combinedDF.show(50,false)
 
@@ -247,36 +309,39 @@ object Lab2 {
       harbourDF: DataFrame
   ) {
 
-    /** ****** find the closest city **********
-      */
-
-    //+----------+------------+-----------+----------+---------------+--------+
-    //|place     |num_evacuees|destination|dest_place|safe_population|distance| H3Rough floodH3
-    //+----------+------------+-----------+----------+---------------+--------+
-    //|Bleiswijk |11919       |Delft      |city      |101386         |101     |
-    //|Nootdorp  |19160       |Delft      |city      |101386         |35      |
 // Instead of directly join the DFs based on H3Rough
 // need to check whether the H3Rough of the safe city is included in the flooded H3Rough List
-    val floodTocity =
+    val k1 = 1
+    val floodTocity1 =
       floodDF //join flood & safe df with H3Rough, calculate the distance between each place and destination
         .join(
           safeDF,
           arrays_overlap(col("floodH3Rough"), col("H3RoughArray")),
           "leftouter"
         )
-        // .join(safeDF,Seq("H3"))
-        .withColumn("city_distance", distanceUDF(col("floodH3"), col("safeH3")))
-        .drop("safeH3", "H3RoughArray")
         .cache()
-    // .sort("place")// test result
-    // println("floodTocity")
-    // floodTocity.show(100, false)
+    val matched1 = floodTocity1
+      .filter(col("destination").isNotNull)
+      .drop("floodH3Rough", "H3RoughArray")
+    val unMatched1 = floodTocity1
+      .filter("destination is Null")
+      .drop(
+        "floodH3Rough",
+        "H3RoughArray",
+        "safeH3",
+        "safe_population",
+        "destination"
+      )
+    val floodTocity2 = unMatched1.crossJoin(safeDF).drop("H3RoughArray")
+    val floodTocityMatch =
+      matched1.union(floodTocity2)
+      //.persist(StorageLevels.MEMORY_AND_DISK)
 
-// +-------------+---------------+----------+------------+---------------+-----------+---------------+
-// |city_distance|H3Rough        |place     |num_evacuees|floodH3        |destination|safe_population|
-// +-------------+---------------+----------+------------+---------------+-----------+---------------+
-// |101          |83196bfffffffff|Bleiswijk |11919       |8a196bb2e347fff|Delft      |101386         |
-// |28           |83196bfffffffff|Oegstgeest|23608       |8a19694b2417fff|Leiden     |123753         |
+    val floodTocity = floodTocityMatch
+      .withColumn("city_distance", distanceUDF(col("floodH3"), col("safeH3")))
+      .filter(col("city_distance") >= 0)
+      .drop("floodH3Rough", "H3RoughArray", "lat", "lon", "safeH3")
+    .persist(StorageLevels.MEMORY_AND_DISK)
 
     println("******************************************************")
     println("*************** find the closest city ****************")
@@ -284,6 +349,7 @@ object Lab2 {
       .groupBy("place")
       .min("city_distance")
       .withColumnRenamed("min(city_distance)", "city_distance")
+      //.persist(StorageLevels.MEMORY_AND_DISK)
 
     val closestCity = minCity
       .join(
@@ -295,16 +361,6 @@ object Lab2 {
         "place",
         "city_distance"
       ) // avoid duplicate due to the same city_distance
-
-    //  println("closestCity")
-    //  closestCity.printSchema()
-//    root
-//  |-- place: string (nullable = true)
-//  |-- city_distance: integer (nullable = true)
-//  |-- num_evacuees: integer (nullable = true)
-//  |-- destination: string (nullable = true)
-//  |-- safe_population: string (nullable = true)
-
     // closestCity.show(50, false)
 
     /** ***** find the closest harbour ******
@@ -321,9 +377,8 @@ object Lab2 {
           "harbour_distance",
           distanceUDF(col("floodH3"), col("harbourH3"))
         )
-        //.drop("H3RoughArray", "floodH3", "harbourH3", "floodH3Rough")
         .drop("harbourH3", "floodH3", "floodH3Rough")
-        .cache()
+        .cache()// this DF will be used multiple times in the following process
 
     val closestHarbour_group = closestHarbour_pre
       .groupBy("place")
@@ -346,7 +401,8 @@ object Lab2 {
         "num_evacuees",
         "H3RoughArray",
         "floodH3",
-        "floodH3Rough"
+        "floodH3Rough",
+        "safeH3"
       ) //for each flooded place, find the distance to the nearest harbour
       .dropDuplicates(
         "place",
@@ -359,18 +415,6 @@ object Lab2 {
     val floodToCH = closestCity
       .join(closestHarbour, Seq("place"), "inner")
       .cache()
-    // floodToCH.printSchema()
-    //  .withColumnRenamed("place", "destination")
-    // .select(
-    //   "num_evacuees",
-    //   "harbour_distance",
-    //   "destination",
-    //   "city_distance",
-    //   "safe_population"
-    // )
-    // println("floodToCH")
-    // floodToCH.show(50, false)
-
     /*
       seperate into two dataframes
       |-- near_harbour: places that are closer to a harbour than a safe city
@@ -433,14 +477,17 @@ object Lab2 {
       .drop("safe_population")
       .write
       .mode("overwrite")
-      .orc("output/data/relocate.orc") // output as .orc file
+      .orc("s3://group-09/Output/data/relocate") // Cloud output
+
+    // relocate_output
+    //   .drop("safe_population")
+    //   .write
+    //   .mode("overwrite")
+    //   .orc("output/data/relocate.orc") // local output
     println("****************** Finished save *********************")
 
     /*
-     val output_12 = spark.createDataFrame(spark.sparkContent.parallelize(relocate_output),schema) //re-create data with the required schema
-     output_12.write.orc("relocate_output_12.orc")
-
-     val testread = spark.read.format("orc").load("output_12.orc")
+        val  = spark.read.format("orc").load("output_12.orc")
      */
 
     // ********* calculate the total number of evacuees to each destination ********
@@ -451,7 +498,7 @@ object Lab2 {
       .agg(
         sum("num_evacuees").as("evacuees_received"),
         avg("safe_population").as("old_population")
-      );
+      )
 
     /** ******calculate the sum of evacuees*******
       */
@@ -483,7 +530,12 @@ object Lab2 {
 
     println("******************************************************")
     println("******************* Saving data **********************")
-    receive_output.write.mode("overwrite").orc("output/data/receive_output.orc")
+    receive_output.write
+      .mode("overwrite")
+      .orc("s3://group-09/Output/data/receive_output") // Cloud output
+    // receive_output.write
+    //   .mode("overwrite")
+    //   .orc("output/data/receive_output.orc") //Local output
     println("****************** Finished save *********************")
 
   }
@@ -491,6 +543,7 @@ object Lab2 {
 
 object h3Helper {
   val h3 = H3Core.newInstance()
+
   def toH3func(lat: Double, lon: Double, res: Int): String =
     h3.geoToH3Address(lat, lon, res)
   // Find the closest safe city within the same H3Rough index
@@ -498,16 +551,9 @@ object h3Helper {
   // Until a safe city is found
   // h3Rough is the H3Rough of a flooded place
   // k is initially set to 1, it should be able to increase
-  // def findNeighbour(h3Index: String, k: Int): List[String] = {
-  //   val refPoint = h3.h3ToGeo(h3Index).toString()
-  //   var lat = refPoint(0)
-  //   var lon = refPoint(1)
-  //   var rough_res: Int = 6
-  //   val h3Rough = h3.geoToH3Address(lat, lon, rough_res)
-  //   return h3.kRing(h3Rough, k).asScala.toList
-  // }
+
   def findNeighbour(lat: Double, lon: Double, k: Int): List[String] = {
-    var rough_res: Int = 2
+    val rough_res: Int = 1
     val h3Rough = h3.geoToH3Address(lat, lon, rough_res)
     return h3.kRing(h3Rough, k).asScala.toList
   }
@@ -516,10 +562,13 @@ object h3Helper {
       des != null
     ) //if no harbour in the hexagon, the distance to harbour will be set to 100000
       //(which is definitely bigger than the distance to any city in that hexagon
-      return h3.h3Distance(origin, des)
+      try {
+        return h3.h3Distance(origin, des)
+      } catch {
+        case e: DistanceUndefinedException => -1
+      }
     else
-      return 100000
+      return -1
   }
 
 }
-
